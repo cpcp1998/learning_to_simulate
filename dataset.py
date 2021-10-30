@@ -37,10 +37,13 @@ def preprocess(particle_type, position_seq, target_position, metadata, noise_std
     edge_displacement /= metadata["default_connectivity_radius"]
     edge_distance = torch.norm(edge_displacement, dim=-1, keepdim=True)
 
-    last_velocity = velocity_seq[:, -1]
-    next_velocity = target_position + position_noise[:, -1] - recent_position
-    acceleration = next_velocity - last_velocity
-    acceleration = (acceleration - torch.tensor(metadata["acc_mean"])) / torch.sqrt(torch.tensor(metadata["acc_std"]) ** 2 + noise_std ** 2)
+    if target_position is not None:
+        last_velocity = velocity_seq[:, -1]
+        next_velocity = target_position + position_noise[:, -1] - recent_position
+        acceleration = next_velocity - last_velocity
+        acceleration = (acceleration - torch.tensor(metadata["acc_mean"])) / torch.sqrt(torch.tensor(metadata["acc_std"]) ** 2 + noise_std ** 2)
+    else:
+        acceleration = None
 
     graph = pyg.data.Data(
         x=particle_type,
@@ -115,3 +118,49 @@ class OneStepDataset(pyg.data.Dataset):
         with torch.no_grad():
             graph = preprocess(particle_type, position_seq, target_position, self.metadata, self.noise_std)
         return graph
+
+
+class RolloutDataset(pyg.data.Dataset):
+    def __init__(self, data_path, split, window_length=7):
+        super().__init__()
+        with open(os.path.join(data_path, "metadata.json")) as f:
+            self.metadata = json.load(f)
+        with open(os.path.join(data_path, f"{split}_offset.json")) as f:
+            self.offset = json.load(f)
+        self.offset = {int(k): v for k, v in self.offset.items()}
+        self.window_length = window_length
+
+        self.particle_type = np.memmap(os.path.join(data_path, f"{split}_particle_type.dat"), dtype=np.int64, mode="r")
+        self.position = np.memmap(os.path.join(data_path, f"{split}_position.dat"), dtype=np.float32, mode="r")
+        if os.path.exists(os.path.join(data_path, f"{split}_step_context.dat")):
+            self.step_context = np.memmap(os.path.join(data_path, f"{split}_step_context.dat"), dtype=np.float32, mode="r")
+        else:
+            self.step_context = None
+
+        for traj in self.offset.values():
+            self.dim = traj["position"]["shape"][2]
+            if self.step_context:
+                self.global_feature_dim = traj["step_context"]["shape"][1]
+            else:
+                self.global_feature_dim = None
+            break
+
+    def len(self):
+        return len(self.offset)
+
+    def get(self, idx):
+        traj = self.offset[idx]
+        size = traj["position"]["shape"][1]
+        time_step = traj["position"]["shape"][0]
+        particle_type = self.particle_type[traj["particle_type"]["offset"]: traj["particle_type"]["offset"] + size].copy()
+        particle_type = torch.from_numpy(particle_type)
+        position = self.position[traj["position"]["offset"]: traj["position"]["offset"] + time_step * size * self.dim].copy()
+        position.resize(traj["position"]["shape"])
+        position = torch.from_numpy(position)
+        data = {"particle_type": particle_type, "position": position}
+        if self.step_context:
+            step_context = self.step_context[traj["step_context"]["offset"]: traj["step_context"]["offset"] + time_step * self.global_feature_dim].copy()
+            step_context.resize(time_step, self.global_feature_dim)
+            step_context = torch.from_numpy(step_context)
+            data["global"] = step_context
+        return data

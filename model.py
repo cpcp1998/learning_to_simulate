@@ -69,6 +69,7 @@ class LearnedSimulator(torch.nn.Module):
         window_size=5,
     ):
         super().__init__()
+        self.window_size = window_size
         self.embed_type = torch.nn.Embedding(num_particle_types, particle_type_dim)
         self.node_in = MLP(particle_type_dim + dim * (window_size + 2), hidden_size, hidden_size, 3)
         self.edge_in = MLP(dim + 1, hidden_size, hidden_size, 3)
