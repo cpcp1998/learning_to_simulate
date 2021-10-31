@@ -28,7 +28,7 @@ def main():
     os.makedirs(args.output_path, exist_ok=True)
 
     train_dataset = dataset.OneStepDataset(args.data_path, "train", noise_std=args.noise)
-    valid_dataset = dataset.OneStepDataset(args.data_path, "valid", noise_std=0.0)
+    valid_dataset = dataset.OneStepDataset(args.data_path, "valid", noise_std=args.noise)
     train_loader = pyg.loader.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, pin_memory=True, num_workers=args.num_workers)
     valid_loader = pyg.loader.DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True, num_workers=args.num_workers)
     rollout_dataset = dataset.RolloutDataset(args.data_path, "valid")
@@ -88,7 +88,7 @@ def main():
                         "model": simulator.state_dict(),
                         "optimizer": optimizer.state_dict(),
                         "scheduler": scheduler.state_dict(),
-                        "training_data": args.data_path,
+                        "args": vars(args),
                     },
                     os.path.join(args.output_path, f"checkpoint_{total_batch}.pt")
                 )
